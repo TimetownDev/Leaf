@@ -5,23 +5,30 @@ Subject: [PATCH] optimize get chunk
 
 
 diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
-index 36ce2be30478d734d8326eeeb004ba7dc61e0642..92c77c8fe79738dff149687278cbc385ba631a20 100644
+index 36ce2be30478d734d8326eeeb004ba7dc61e0642..d2f48f98bd8be8ba5f5ba98a222e46c4f782453d 100644
 --- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
 +++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
 @@ -78,6 +78,7 @@ public final class ChunkHolderManager {
      final ChunkUnloadQueue unloadQueue;
  
      private final ConcurrentLong2ReferenceChainedHashTable<NewChunkHolder> chunkHolders = ConcurrentLong2ReferenceChainedHashTable.createWithCapacity(16384, 0.25f);
-+    private final it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap<NewChunkHolder> chunkHoldersNoSync = new it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap<>(1024, 0.5F); // Leaf - optimize get chunk
++    private final org.dreeam.leaf.world.ChunkCache<NewChunkHolder> chunkHoldersNoSync; // Leaf - optimize get chunk
      private final ServerLevel world;
      private final ChunkTaskScheduler taskScheduler;
      private long currentTick;
-@@ -374,6 +375,8 @@ public final class ChunkHolderManager {
+@@ -112,6 +113,7 @@ public final class ChunkHolderManager {
+         this.taskScheduler = taskScheduler;
+         this.ticketLockArea = new ReentrantAreaLock(taskScheduler.getChunkSystemLockShift());
+         this.unloadQueue = new ChunkUnloadQueue(((ChunkSystemServerLevel)world).moonrise$getRegionChunkShift());
++        this.chunkHoldersNoSync = new org.dreeam.leaf.world.ChunkCache<>(world.getChunkSource().mainThread, 1024, 0.5F); // Leaf - optimize get chunk
+     }
+ 
+     public boolean processTicketUpdates(final int chunkX, final int chunkZ) {
+@@ -374,6 +376,7 @@ public final class ChunkHolderManager {
                  if (current == null) {
                      // must create
                      current = ChunkHolderManager.this.createChunkHolder(key);
-+                    ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(ChunkHolderManager.this.world, CoordinateUtils.getChunkX(key), CoordinateUtils.getChunkZ(key), "Cannot update chunk status asynchronously"); // Leaf - optimize get chunk
-+                    ChunkHolderManager.this.chunkHoldersNoSync.put(key, current); // Leaf - optimize get chunk
++                    if (ChunkHolderManager.this.chunkHoldersNoSync.ensureSameThread()) ChunkHolderManager.this.chunkHoldersNoSync.put(key, current); // Leaf - optimize get chunk
                      ChunkHolderManager.this.chunkHolders.put(key, current);
                      current.updateTicketLevel(newLevel);
                  } else {
@@ -32,7 +39,7 @@ index 36ce2be30478d734d8326eeeb004ba7dc61e0642..92c77c8fe79738dff149687278cbc385
 -        return this.chunkHolders.get(CoordinateUtils.getChunkKey(chunkX, chunkZ));
 +        // Leaf start - optimize get chunk
 +        final long position = CoordinateUtils.getChunkKey(chunkX, chunkZ);
-+        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(world, chunkX, chunkZ)) {
++        if (this.chunkHoldersNoSync.isSameThread()) {
 +            return this.chunkHoldersNoSync.get(position);
 +        } else {
 +            return this.chunkHolders.get(position);
@@ -43,7 +50,7 @@ index 36ce2be30478d734d8326eeeb004ba7dc61e0642..92c77c8fe79738dff149687278cbc385
      public NewChunkHolder getChunkHolder(final long position) {
 -        return this.chunkHolders.get(position);
 +        // Leaf start - optimize get chunk
-+        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(world, CoordinateUtils.getChunkX(position), CoordinateUtils.getChunkZ(position))) {
++        if (this.chunkHoldersNoSync.isSameThread()) {
 +            return this.chunkHoldersNoSync.get(position);
 +        } else {
 +            return this.chunkHolders.get(position);
@@ -52,52 +59,49 @@ index 36ce2be30478d734d8326eeeb004ba7dc61e0642..92c77c8fe79738dff149687278cbc385
      }
  
      public void raisePriority(final int x, final int z, final Priority priority) {
-@@ -986,6 +1002,8 @@ public final class ChunkHolderManager {
+@@ -986,6 +1002,7 @@ public final class ChunkHolderManager {
          }
  
          current = this.createChunkHolder(position);
-+        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(ChunkHolderManager.this.world, CoordinateUtils.getChunkX(position), CoordinateUtils.getChunkZ(position), "Cannot update chunk status asynchronously"); // Leaf - optimize get chunk
-+        this.chunkHoldersNoSync.put(position, current); // Leaf - optimize get chunk
++        if (this.chunkHoldersNoSync.ensureSameThread()) this.chunkHoldersNoSync.put(position, current); // Leaf - optimize get chunk
          this.chunkHolders.put(position, current);
  
  
-@@ -1158,7 +1176,12 @@ public final class ChunkHolderManager {
+@@ -1158,7 +1175,11 @@ public final class ChunkHolderManager {
          holder.onUnload();
          this.autoSaveQueue.remove(holder);
          PlatformHooks.get().onChunkHolderDelete(this.world, holder.vanillaChunkHolder);
 -        this.chunkHolders.remove(CoordinateUtils.getChunkKey(holder.chunkX, holder.chunkZ));
 +        // Leaf start - optimize get chunk
 +        long position = CoordinateUtils.getChunkKey(holder.chunkX, holder.chunkZ);
-+        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(ChunkHolderManager.this.world, CoordinateUtils.getChunkX(position), CoordinateUtils.getChunkZ(position), "Cannot update chunk status asynchronously");
-+        this.chunkHoldersNoSync.remove(position);
++        if (this.chunkHoldersNoSync.ensureSameThread()) this.chunkHoldersNoSync.remove(position);
 +        this.chunkHolders.remove(position);
 +        // Leaf end - optimize get chunk
      }
  
      // note: never call while inside the chunk system, this will absolutely break everything
 diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
-index ba0f66b5089e252e5d532cb4b94c6246a65d69d8..d8d064f1e8cf01a363566438c0b1cab92303a463 100644
+index b2ded00d09bdab9889515b4829744eedaa0b0aa0..578dbe9c75a401cfe0365df01e267b41b7394a56 100644
 --- a/net/minecraft/server/level/ServerChunkCache.java
 +++ b/net/minecraft/server/level/ServerChunkCache.java
 @@ -77,6 +77,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
      private volatile NaturalSpawner.SpawnState lastSpawnState; // Leaf - optimize mob spawning
      // Paper start
      public final ca.spottedleaf.concurrentutil.map.ConcurrentLong2ReferenceChainedHashTable<net.minecraft.world.level.chunk.LevelChunk> fullChunks = new ca.spottedleaf.concurrentutil.map.ConcurrentLong2ReferenceChainedHashTable<>();
-+    public final it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap<net.minecraft.world.level.chunk.LevelChunk> fullChunksNonSync = new it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap<>(1024, 0.5F); // Leaf - optimize get chunk
++    public final org.dreeam.leaf.world.ChunkCache<LevelChunk> fullChunksNonSync; // Leaf - optimize get chunk
      public int getFullChunksCount() {
          return this.fullChunks.size();
      }
-@@ -87,16 +88,28 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+@@ -87,16 +88,27 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
      @Override
      public final void moonrise$setFullChunk(final int chunkX, final int chunkZ, final LevelChunk chunk) {
          final long key = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkX, chunkZ);
 +        // Leaf start - optimize get chunk
-+        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.level, chunkX, chunkZ, "Cannot update full chunk status asynchronously");
          if (chunk == null) {
-+            this.fullChunksNonSync.remove(key);
++            if (this.fullChunksNonSync.ensureSameThread()) this.fullChunksNonSync.remove(key);
              this.fullChunks.remove(key);
          } else {
-+            this.fullChunksNonSync.put(key,chunk);
++            if (this.fullChunksNonSync.ensureSameThread()) this.fullChunksNonSync.put(key,chunk);
              this.fullChunks.put(key, chunk);
          }
 +        // Leaf end - optimize get chunk
@@ -108,7 +112,7 @@ index ba0f66b5089e252e5d532cb4b94c6246a65d69d8..d8d064f1e8cf01a363566438c0b1cab9
 -        return this.fullChunks.get(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkX, chunkZ));
 +        // Leaf start - optimize get chunk
 +        long key = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkX, chunkZ);
-+        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, chunkX, chunkZ)) {
++        if (this.fullChunksNonSync.isSameThread()) {
 +            return this.fullChunksNonSync.get(key);
 +        } else {
 +            return this.fullChunks.get(key);
@@ -117,6 +121,14 @@ index ba0f66b5089e252e5d532cb4b94c6246a65d69d8..d8d064f1e8cf01a363566438c0b1cab9
      }
  
      private ChunkAccess syncLoad(final int chunkX, final int chunkZ, final ChunkStatus toStatus) {
+@@ -203,6 +215,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         this.mainThreadProcessor = new ServerChunkCache.MainThreadExecutor(level);
+         this.mainThread = Thread.currentThread();
+         Path path = levelStorageAccess.getDimensionPath(level.dimension()).resolve("data");
++        this.fullChunksNonSync = new org.dreeam.leaf.world.ChunkCache<>(mainThread, 1024, 0.5F); // Leaf - optimize get chunk
+ 
+         try {
+             FileUtil.createDirectoriesSafe(path);
 @@ -282,7 +295,14 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
  
      @Nullable
@@ -124,7 +136,7 @@ index ba0f66b5089e252e5d532cb4b94c6246a65d69d8..d8d064f1e8cf01a363566438c0b1cab9
 -        return this.fullChunks.get(ChunkPos.asLong(x, z));
 +        // Leaf start - optimize get chunk
 +        long key = ChunkPos.asLong(x, z);
-+        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, x, z)) {
++        if (this.fullChunksNonSync.isSameThread()) {
 +            return this.fullChunksNonSync.get(key);
 +        } else {
 +            return this.fullChunks.get(key);
@@ -139,7 +151,7 @@ index ba0f66b5089e252e5d532cb4b94c6246a65d69d8..d8d064f1e8cf01a363566438c0b1cab9
          if (chunkStatus == ChunkStatus.FULL) {
 -            final LevelChunk ret = this.fullChunks.get(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(x, z));
 +            long key = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(x, z); // Leaf - optimize get chunk
-+            final LevelChunk ret = (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, x, z)) ? this.fullChunksNonSync.get(key) : this.fullChunks.get(key); // Leaf - optimize get chunk
++            final LevelChunk ret = this.fullChunksNonSync.isSameThread() ? this.fullChunksNonSync.get(key) : this.fullChunks.get(key); // Leaf - optimize get chunk
  
              if (ret != null) {
                  return ret;
@@ -149,7 +161,7 @@ index ba0f66b5089e252e5d532cb4b94c6246a65d69d8..d8d064f1e8cf01a363566438c0b1cab9
          // Paper start - rewrite chunk system
 -        final LevelChunk ret = this.fullChunks.get(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkX, chunkZ));
 +        long key = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkX, chunkZ); // Leaf - optimize get chunk
-+        final LevelChunk ret = (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, chunkX, chunkZ)) ? this.fullChunksNonSync.get(key) : this.fullChunks.get(key); // Leaf - optimize get chunk
++        final LevelChunk ret = this.fullChunksNonSync.isSameThread() ? this.fullChunksNonSync.get(key) : this.fullChunks.get(key); // Leaf - optimize get chunk
          if (!ca.spottedleaf.moonrise.common.PlatformHooks.get().hasCurrentlyLoadingChunk()) {
              return ret;
          }
@@ -215,7 +227,7 @@ index c3ecdd80efad340c9fa0ea6913db9a3362b53ad4..17be5a6c1fc0a8a6c1c77c624f181cf5
  
      @Override
 diff --git a/net/minecraft/world/level/chunk/PalettedContainer.java b/net/minecraft/world/level/chunk/PalettedContainer.java
-index 59d48e7dc0911557c57a7e07f5f9013c010165bd..0ef0a0f25633633450acab077c0395d000475618 100644
+index 49220967392331dd9928a539da6e6052b007e318..b132f7030a023fecde4ae3eea72e565bb7987281 100644
 --- a/net/minecraft/world/level/chunk/PalettedContainer.java
 +++ b/net/minecraft/world/level/chunk/PalettedContainer.java
 @@ -48,6 +48,18 @@ public class PalettedContainer<T> implements PaletteResize<T>, PalettedContainer
