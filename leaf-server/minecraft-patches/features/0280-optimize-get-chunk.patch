@@ -153,41 +153,6 @@ index ba0f66b5089e252e5d532cb4b94c6246a65d69d8..d8d064f1e8cf01a363566438c0b1cab9
          if (!ca.spottedleaf.moonrise.common.PlatformHooks.get().hasCurrentlyLoadingChunk()) {
              return ret;
          }
-diff --git a/net/minecraft/util/SimpleBitStorage.java b/net/minecraft/util/SimpleBitStorage.java
-index 8091f0c0a536047ead4966e70785962e87faad9a..eb45a4869aca9504688a899aced5226f4f325ddd 100644
---- a/net/minecraft/util/SimpleBitStorage.java
-+++ b/net/minecraft/util/SimpleBitStorage.java
-@@ -204,8 +204,8 @@ public class SimpleBitStorage implements BitStorage {
-     private final long mask;
-     private final int size;
-     private final int valuesPerLong;
--    private final int divideMul; private final long divideMulUnsigned; // Paper - Perf: Optimize SimpleBitStorage; referenced in b(int) with 2 Integer.toUnsignedLong calls
--    private final int divideAdd; private final long divideAddUnsigned; // Paper - Perf: Optimize SimpleBitStorage
-+    private final int divideMul; /*private final long divideMulUnsigned;*/ // Paper - Perf: Optimize SimpleBitStorage; referenced in b(int) with 2 Integer.toUnsignedLong calls // Leaf - optimize get chunk
-+    private final int divideAdd; /*private final long divideAddUnsigned;*/ // Paper - Perf: Optimize SimpleBitStorage // Leaf - optimize get chunk
-     private final int divideShift;
- 
-     // Paper start - optimise bitstorage read/write operations
-@@ -262,8 +262,8 @@ public class SimpleBitStorage implements BitStorage {
-         this.mask = (1L << bits) - 1L;
-         this.valuesPerLong = (char)(64 / bits);
-         int i = 3 * (this.valuesPerLong - 1);
--        this.divideMul = MAGIC[i + 0]; this.divideMulUnsigned = Integer.toUnsignedLong(this.divideMul); // Paper - Perf: Optimize SimpleBitStorage
--        this.divideAdd = MAGIC[i + 1]; this.divideAddUnsigned = Integer.toUnsignedLong(this.divideAdd); // Paper - Perf: Optimize SimpleBitStorage
-+        this.divideMul = MAGIC[i + 0]; /*this.divideMulUnsigned = Integer.toUnsignedLong(this.divideMul);*/ // Paper - Perf: Optimize SimpleBitStorage // Leaf - optimize get chunk
-+        this.divideAdd = MAGIC[i + 1]; /*this.divideAddUnsigned = Integer.toUnsignedLong(this.divideAdd);*/ // Paper - Perf: Optimize SimpleBitStorage // Leaf - optimize get chunk
-         this.divideShift = MAGIC[i + 2];
-         int i1 = (size + this.valuesPerLong - 1) / this.valuesPerLong;
-         if (data != null) {
-@@ -285,7 +285,7 @@ public class SimpleBitStorage implements BitStorage {
-     }
- 
-     private int cellIndex(int index) {
--        return (int)(index * this.divideMulUnsigned + this.divideAddUnsigned >> 32 >> this.divideShift); // Paper - Perf: Optimize SimpleBitStorage
-+        return (int)(index * Integer.toUnsignedLong(this.divideMul) + Integer.toUnsignedLong(this.divideAdd) >> 32 >> this.divideShift); // Paper - Perf: Optimize SimpleBitStorage // Leaf - optimize get chunk
-     }
- 
-     @Override
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
 index 2a1c89bb6712c97ad48b9f64c26f36afe8c811e4..c18614dbb86e843752fba35ee0b6ac422b5bea54 100644
 --- a/net/minecraft/world/level/Level.java
@@ -223,7 +188,7 @@ index 2a1c89bb6712c97ad48b9f64c26f36afe8c811e4..c18614dbb86e843752fba35ee0b6ac42
                  // Paper start - rewrite chunk system
                  // Leaf start - SparklyPaper - parallel world ticking (only run mid-tick at the end of each tick / fixes concurrency bugs related to executeMidTickTasks) - do not bother with condition work / make configurable
 diff --git a/net/minecraft/world/level/chunk/LevelChunk.java b/net/minecraft/world/level/chunk/LevelChunk.java
-index c3ecdd80efad340c9fa0ea6913db9a3362b53ad4..dd4dc871c3a2bd3ccb487242fb457f8ad4bc92b3 100644
+index c3ecdd80efad340c9fa0ea6913db9a3362b53ad4..17be5a6c1fc0a8a6c1c77c624f181cf5eddb4d70 100644
 --- a/net/minecraft/world/level/chunk/LevelChunk.java
 +++ b/net/minecraft/world/level/chunk/LevelChunk.java
 @@ -316,12 +316,18 @@ public class LevelChunk extends ChunkAccess implements ca.spottedleaf.moonrise.p
@@ -249,15 +214,6 @@ index c3ecdd80efad340c9fa0ea6913db9a3362b53ad4..dd4dc871c3a2bd3ccb487242fb457f8a
      }
  
      @Override
-@@ -346,7 +352,7 @@ public class LevelChunk extends ChunkAccess implements ca.spottedleaf.moonrise.p
-             return blockState == null ? Blocks.AIR.defaultBlockState() : blockState;
-         } else {
-             try {
--                int sectionIndex = this.getSectionIndex(y);
-+                int sectionIndex = (y >> 4) - this.minSection; // Leaf - optimize get chunk
-                 if (sectionIndex >= 0 && sectionIndex < this.sections.length) {
-                     LevelChunkSection levelChunkSection = this.sections[sectionIndex];
-                     if (!levelChunkSection.hasOnlyAir()) {
 diff --git a/net/minecraft/world/level/chunk/PalettedContainer.java b/net/minecraft/world/level/chunk/PalettedContainer.java
 index 59d48e7dc0911557c57a7e07f5f9013c010165bd..2400bc237962dd34cba76ebf35c7b28582eeddac 100644
 --- a/net/minecraft/world/level/chunk/PalettedContainer.java
