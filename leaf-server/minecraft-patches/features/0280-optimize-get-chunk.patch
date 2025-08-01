@@ -215,7 +215,7 @@ index c3ecdd80efad340c9fa0ea6913db9a3362b53ad4..17be5a6c1fc0a8a6c1c77c624f181cf5
  
      @Override
 diff --git a/net/minecraft/world/level/chunk/PalettedContainer.java b/net/minecraft/world/level/chunk/PalettedContainer.java
-index 59d48e7dc0911557c57a7e07f5f9013c010165bd..2400bc237962dd34cba76ebf35c7b28582eeddac 100644
+index 59d48e7dc0911557c57a7e07f5f9013c010165bd..0ef0a0f25633633450acab077c0395d000475618 100644
 --- a/net/minecraft/world/level/chunk/PalettedContainer.java
 +++ b/net/minecraft/world/level/chunk/PalettedContainer.java
 @@ -48,6 +48,18 @@ public class PalettedContainer<T> implements PaletteResize<T>, PalettedContainer
@@ -251,7 +251,7 @@ index 59d48e7dc0911557c57a7e07f5f9013c010165bd..2400bc237962dd34cba76ebf35c7b285
      public T get(int index) { // Paper - public
          // Paper start - optimise palette reads
 -        final PalettedContainer.Data<T> data = this.data;
-+        final PalettedContainer.Data<T> data = (PalettedContainer.Data<T>) DATA_HANDLE.getOpaque(this); // Leaf - optimize get chunk
++        final PalettedContainer.Data<T> data = (PalettedContainer.Data<T>) DATA_HANDLE.getAcquire(this); // Leaf - optimize get chunk
          return this.readPalette(data, data.storage.get(index));
          // Paper end - optimise palette reads
      }
