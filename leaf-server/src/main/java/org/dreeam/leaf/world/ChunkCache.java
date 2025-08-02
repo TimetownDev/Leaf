@@ -2,17 +2,16 @@ package org.dreeam.leaf.world;
 
 import it.unimi.dsi.fastutil.HashCommon;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
-import org.dreeam.leaf.config.modules.async.SparklyPaperParallelWorldTicking;
 
 public final class ChunkCache<V> extends Long2ReferenceOpenHashMap<V> {
     private static final long EMPTY_KEY = Long.MIN_VALUE;
     private long k1 = EMPTY_KEY;
     private V v1 = null;
-    private final Thread thread;
+    private Thread thread;
 
     public ChunkCache(Thread thread, final int expected, final float f) {
         super(expected, f);
-        this.thread = SparklyPaperParallelWorldTicking.enabled ? null : thread;
+        this.thread = thread;
     }
 
     public V get(long k) {
@@ -75,18 +74,18 @@ public final class ChunkCache<V> extends Long2ReferenceOpenHashMap<V> {
         super.clear();
     }
 
+    public void setThread() {
+        this.thread = Thread.currentThread();
+    }
+
     public boolean isSameThread() {
         return Thread.currentThread() == this.thread;
     }
 
-    public boolean ensureSameThread() {
-        if (this.thread == null) {
-            return false;
-        }
-        if (!isSameThread()) {
+    public void ensureSameThread() {
+        if (Thread.currentThread() != this.thread) {
             throw new IllegalStateException("Thread failed main thread check: Cannot update chunk status asynchronously, context=thread=" + Thread.currentThread().getName());
         }
-        return true;
     }
 
     @Override
