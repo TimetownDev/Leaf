@@ -213,15 +213,12 @@ public final class ChunkCache<V> {
     ///
     /// For non-owning threads, always return false.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// The caller must ensure proper happens-before relationships when transferring ownership between threads.
     ///
-    /// Only checks for [Thread#currentThread()]. For all non-owning threads, always returns false.
-    /// This method provides no memory synchronization guarantees.
-    ///
     /// @return the current thread owns this map
-    /// @implNote This method is used for fast thread ownership verification
+    /// @implNote This method provides no memory synchronization guarantees
     public boolean isSameThread() {
         return Thread.currentThread() == this.thread;
     }
