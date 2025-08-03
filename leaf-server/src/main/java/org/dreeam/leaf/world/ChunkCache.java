@@ -13,16 +13,6 @@ import java.util.concurrent.Future;
 /// All mutating operations will throw [IllegalStateException]
 /// if the current thread is not the owning thread.
 ///
-/// # Safety
-///
-/// Proper happens-before relationships must be established when transferring ownership between threads.
-///
-/// @implNote
-/// When accessing from the owning thread,
-/// all cache updates are guaranteed to be visible.
-/// Cross-thread access without proper synchronization
-/// would result in stale or inconsistent state.
-///
 /// @author hayanesuru
 /// @see it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap
 public final class ChunkCache<V> {
@@ -56,20 +46,20 @@ public final class ChunkCache<V> {
     /// Retrieves the value associated with the specified key.
     ///
     /// This method implements a single-entry cache optimization:
+    ///
     /// if the requested key matches the most recently accessed key,
     /// the cached value is returned immediately without hash map lookup.
     ///
+    /// This method does not perform thread checks for performance reasons.
+    ///
     /// # Safety
-    ///
-    /// This method does not perform thread safety checks for performance reasons.
-    ///
-    /// The caller must call [#isSameThread()] to ensure thread safety compliance.
     ///
     /// The caller must ensure that the current thread is the owning thread.
     ///
     /// @param k the key whose associated value is to be returned
     /// @return the value associated with the key, or `null` if no mapping exists
     /// @implNote This method updates the single-entry cache on successful lookups
+    /// @see #isSameThread
     public V get(long k) {
         long k1 = this.k1;
         V v1 = this.v1;
@@ -110,10 +100,6 @@ public final class ChunkCache<V> {
     ///
     /// If the removed key matches the cached key, the single-entry cache is invalidated.
     ///
-    /// # Safety
-    ///
-    /// The caller must ensure proper happens-before relationships when transferring ownership between threads.
-    ///
     /// @param k the key whose mapping is to be removed
     /// @return the previous value associated with the key, or `null` if no mapping existed
     /// @throws IllegalStateException if the current thread is not the owning thread
@@ -143,10 +129,6 @@ public final class ChunkCache<V> {
     ///
     /// If the key matches the cached key, the single-entry cache is invalidated.
     ///
-    /// # Safety
-    ///
-    /// The caller must ensure proper happens-before relationships when transferring ownership between threads.
-    ///
     /// @param k the key with which the specified value is to be associated
     /// @param levelChunk the value to be associated with the specified key
     /// @return the previous value associated with the key, or null if no mapping existed
@@ -172,10 +154,6 @@ public final class ChunkCache<V> {
     ///
     /// This method also clear the single-entry cache.
     ///
-    /// # Safety
-    ///
-    /// The caller must ensure proper happens-before relationships when transferring ownership between threads.
-    ///
     /// @throws IllegalStateException if the current thread is not the owning thread
     public void clear() {
         // Safety: throws IllegalStateException for all non-owning threads
@@ -193,44 +171,26 @@ public final class ChunkCache<V> {
     ///
     /// # Safety
     ///
-    /// This method does not perform synchronization. The caller must ensure proper
-    /// happens-before relationships when transferring ownership between threads.
-    /// Typically, this should be done through proper synchronization mechanisms like
+    /// The caller must ensure proper happens-before relationships
+    /// when transferring ownership between threads.
+    ///
+    /// This should be done through proper synchronization mechanisms like
     /// [Thread#join()] or [Future#get()].
     ///
-    /// @implNote
-    /// This is used when transferring ownership from one
-    /// thread to another, such as during tick thread changes
+    /// @implNote This method does not perform synchronization
     public void setThread() {
         this.thread = Thread.currentThread();
     }
 
     /// Checks if the current thread is the same as the owning thread.
     ///
-    /// This method only checks against [Thread#currentThread()] and does not
-    /// perform any synchronization.
-    /// Provides fail-fast behavior for improper cross-thread access.
-    ///
-    /// For non-owning threads, always return false.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure proper happens-before relationships when transferring ownership between threads.
-    ///
     /// @return the current thread owns this map
-    /// @implNote This method provides no memory synchronization guarantees
+    /// @implNote This method does not perform synchronization
     public boolean isSameThread() {
         return Thread.currentThread() == this.thread;
     }
 
     /// Ensure that the current thread is the owning thread.
-    ///
-    /// This method performs a thread ownership check and throws an exception if
-    /// the current thread does not own this cache.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure proper happens-before relationships when transferring ownership between threads.
     ///
     /// @throws IllegalStateException if the current thread is not the owning thread
     /// @see #isSameThread()
