@@ -3,6 +3,7 @@ package org.dreeam.leaf.world;
 import ca.spottedleaf.moonrise.common.list.ReferenceList;
 import ca.spottedleaf.moonrise.common.list.ShortList;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongArrays;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
@@ -15,19 +16,17 @@ import net.minecraft.world.level.material.FluidState;
 
 public final class RandomTickSystem {
     private static final long SCALE = 0x100000L;
-    private static final long TICK_FILTER_MASK = 0b11L;
-    private static final long CHUNK_BLOCKS = 4096L / 4L;
-    private static final int BITS_STEP = 2;
+    private static final long TICK_FILTER_MASK = 0b1111L;
+    private static final int BITS_STEP = 4;
     private static final int BITS_MAX = 60;
+    private static final long CHUNK_BLOCKS = 4096L / 4L;
 
     private final LongArrayList queue = new LongArrayList();
-    private final LongArrayList samples = new LongArrayList();
-    private final LongArrayList weights = new LongArrayList();
+    private long[] samples = LongArrays.EMPTY_ARRAY;
+    private long[] weights = LongArrays.EMPTY_ARRAY;
 
     public void tick(ServerLevel world) {
         queue.clear();
-        samples.clear();
-        weights.clear();
 
         final BitRandomSource random = world.simpleRandom;
         final ReferenceList<LevelChunk> entityTickingChunks = world.moonrise$getEntityTickingChunks();
@@ -42,11 +41,9 @@ public final class RandomTickSystem {
             iceSnow(world, size, randomTickSpeed, random, raw);
         }
         final long weightsSum = collectTickingChunks(size, random, raw, randomTickSpeed);
-        if (samples.isEmpty() || weightsSum == 0L) {
-            return;
+        if (weightsSum != 0L) {
+            sampling(random, weightsSum);
         }
-        sampling(random, weightsSum);
-
         final long[] q = queue.elements();
         final int minY = ca.spottedleaf.moonrise.common.util.WorldUtil.getMinSection(world) << 4;
         for (int k = 0, len = queue.size(); k < len; ++k) {
@@ -64,8 +61,8 @@ public final class RandomTickSystem {
             return;
         }
 
-        final long[] w = weights.elements();
-        final long[] s = samples.elements();
+        final long[] w = weights;
+        final long[] s = samples;
         long accumulated = w[0];
         final long spoke = weightsSum / chosen;
         if (spoke == 0L) return;
@@ -87,7 +84,10 @@ public final class RandomTickSystem {
         long cacheRandom = random.nextLong();
         long weightsSum = 0L;
 
-        for (int i = 0; i < size; i++) {
+        int i = 0;
+        int m = 0;
+        final long scale = randomTickSpeed * SCALE / CHUNK_BLOCKS;
+        for (int j = size - 3; i < j; i++) {
             if (bits != BITS_MAX) {
                 bits += BITS_STEP;
             } else {
@@ -97,18 +97,78 @@ public final class RandomTickSystem {
             if ((cacheRandom & (TICK_FILTER_MASK << bits)) != 0L) {
                 continue;
             }
+            final LevelChunk chunk1 = raw[i];
+            final LevelChunk chunk2 = raw[i + 1];
+            final LevelChunk chunk3 = raw[i + 2];
+            final LevelChunk chunk4 = raw[i + 3];
+            final long l = ((long) i) << 16;
+            if (chunk1.leaf$tickingBlocksDirty) {
+                populateChunkTickingCount(chunk1);
+            }
+            if (chunk2.leaf$tickingBlocksDirty) {
+                populateChunkTickingCount(chunk2);
+            }
+            if (chunk3.leaf$tickingBlocksDirty) {
+                populateChunkTickingCount(chunk3);
+            }
+            if (chunk4.leaf$tickingBlocksDirty) {
+                populateChunkTickingCount(chunk4);
+            }
+            final int[] ticking1 = chunk1.leaf$tickingCount;
+            final int[] ticking2 = chunk2.leaf$tickingCount;
+            final int[] ticking3 = chunk3.leaf$tickingCount;
+            final int[] ticking4 = chunk4.leaf$tickingCount;
+            final int s1 = ticking1.length;
+            final int s2 = ticking2.length;
+            final int s3 = ticking3.length;
+            final int s4 = ticking4.length;
+            samples = LongArrays.grow(samples, m + s1 + s2 + s3 + s4, m);
+            weights = LongArrays.grow(weights, m + s1 + s2 + s3 + s4, m);
+            for (int k = 0; k < s1; k++, m++) {
+                int packed = ticking1[k];
+                long weight = (packed >>> 16) * scale;
+                weightsSum += weight;
+                samples[m] = l | (packed & 0xFFFFL);
+                weights[m] = weight;
+            }
+            for (int k = 0; k < s2; k++, m++) {
+                int packed = ticking2[k];
+                long weight = (packed >>> 16) * scale;
+                weightsSum += weight;
+                samples[m] = (l + 0x10000L) | (packed & 0xFFFFL);
+                weights[m] = weight;
+            }
+            for (int k = 0; k < s3; k++, m++) {
+                int packed = ticking3[k];
+                long weight = (packed >>> 16) * scale;
+                weightsSum += weight;
+                samples[m] = (l + 0x20000L) | (packed & 0xFFFFL);
+                weights[m] = weight;
+            }
+            for (int k = 0; k < s4; k++, m++) {
+                int packed = ticking4[k];
+                long weight = (packed >>> 16) * scale;
+                weightsSum += weight;
+                samples[m] = (l + 0x30000L) | (packed & 0xFFFFL);
+                weights[m] = weight;
+            }
+        }
+        for (; i < size; i++) {
+            if ((random.nextInt() & ((int) (TICK_FILTER_MASK >>> 2))) != 0) {
+                continue;
+            }
             final LevelChunk chunk = raw[i];
             if (chunk.leaf$tickingBlocksDirty) {
                 populateChunkTickingCount(chunk);
             }
-            int[] data = chunk.leaf$tickingCount;
-            for (int packed : data) {
-                int count = packed >>> 16;
-                int idx = packed & 0xFFFF;
-                samples.add((((long) i) << 16 | idx));
-                long weight = (randomTickSpeed * count * SCALE) / CHUNK_BLOCKS;
-                weights.add(weight);
+            samples = LongArrays.grow(samples, m + chunk.leaf$tickingCount.length, m);
+            weights = LongArrays.grow(weights, m + chunk.leaf$tickingCount.length, m);
+            for (int packed : chunk.leaf$tickingCount) {
+                long weight = (packed >>> 16) * scale;
                 weightsSum += weight;
+                samples[m] = ((long) i << 16) | (packed & 0xFFFFL);
+                weights[m] = weight;
+                m++;
             }
         }
         return weightsSum;

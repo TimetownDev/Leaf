@@ -105,7 +105,7 @@ index 7849a905db35377da0931aa1c9b8770f30a51044..5f25dbed0d03f3ed625d0f010ff745a4
          } catch (java.lang.InterruptedException | java.util.concurrent.ExecutionException e) {
              throw new RuntimeException(e); // Propagate exception
 diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
-index b2ded00d09bdab9889515b4829744eedaa0b0aa0..0188ae1ffe35153fa57a476e69c0207eaaf0550a 100644
+index b2ded00d09bdab9889515b4829744eedaa0b0aa0..c48c019fc861d3e346690e0cdd74c0816a125786 100644
 --- a/net/minecraft/server/level/ServerChunkCache.java
 +++ b/net/minecraft/server/level/ServerChunkCache.java
 @@ -77,6 +77,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
@@ -153,7 +153,7 @@ index b2ded00d09bdab9889515b4829744eedaa0b0aa0..0188ae1ffe35153fa57a476e69c0207e
  
          try {
              FileUtil.createDirectoriesSafe(path);
-@@ -282,7 +295,14 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+@@ -282,10 +295,24 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
  
      @Nullable
      public LevelChunk getChunkAtIfLoadedImmediately(int x, int z) {
@@ -169,7 +169,17 @@ index b2ded00d09bdab9889515b4829744eedaa0b0aa0..0188ae1ffe35153fa57a476e69c0207e
      }
      // Paper end
  
-@@ -317,7 +337,8 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
++    // Leaf start - optimize get chunk
++    @Nullable
++    public LevelChunk getChunkAtIfLoadedUnchecked(int x, int z) {
++        return this.fullChunksNonSync.get(ChunkPos.asLong(x, z));
++    }
++    // Leaf end - optimize get chunk
++
+     @Override
+     public ThreadedLevelLightEngine getLightEngine() {
+         return this.lightEngine;
+@@ -317,7 +344,8 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
      public ChunkAccess getChunk(int x, int z, ChunkStatus chunkStatus, boolean requireChunk) {
          // Paper start - rewrite chunk system
          if (chunkStatus == ChunkStatus.FULL) {
@@ -179,7 +189,7 @@ index b2ded00d09bdab9889515b4829744eedaa0b0aa0..0188ae1ffe35153fa57a476e69c0207e
  
              if (ret != null) {
                  return ret;
-@@ -334,7 +355,8 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+@@ -334,7 +362,8 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
      @Override
      public LevelChunk getChunkNow(int chunkX, int chunkZ) {
          // Paper start - rewrite chunk system
@@ -189,11 +199,53 @@ index b2ded00d09bdab9889515b4829744eedaa0b0aa0..0188ae1ffe35153fa57a476e69c0207e
          if (!ca.spottedleaf.moonrise.common.PlatformHooks.get().hasCurrentlyLoadingChunk()) {
              return ret;
          }
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index e7b375720c1bb78a9c3edf6d49c973eba1fcf115..15c5a90e77b955eac7f5f5fa40d5a0dba4c4619c 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4866,12 +4866,12 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+         final int minChunkZ = minBlockZ >> 4;
+         final int maxChunkZ = maxBlockZ >> 4;
+ 
+-        final net.minecraft.world.level.chunk.ChunkSource chunkSource = world.getChunkSource();
++        final net.minecraft.server.level.ServerChunkCache chunkSource = ((ServerLevel) world).chunkSource; // Leaf - optimize get chunk
+ 
+         for (int currChunkZ = minChunkZ; currChunkZ <= maxChunkZ; ++currChunkZ) {
+             for (int currChunkX = minChunkX; currChunkX <= maxChunkX; ++currChunkX) {
+                 // Leaf start - Prevent double chunk retrieving in entity fluid pushing check and fluid height updating
+-                final net.minecraft.world.level.chunk.ChunkAccess chunk = chunkSource.getChunk(currChunkX, currChunkZ, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, false);
++                final net.minecraft.world.level.chunk.LevelChunk chunk = chunkSource.getChunkAtIfLoadedUnchecked(currChunkX, currChunkZ); // Leaf - optimize get chunk
+                 if (chunk == null) continue;
+                 final net.minecraft.world.level.chunk.LevelChunkSection[] sections = chunk.getSections();
+                 // Leaf end - Prevent double chunk retrieving in entity fluid pushing check and fluid height updating
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
-index 2a1c89bb6712c97ad48b9f64c26f36afe8c811e4..c18614dbb86e843752fba35ee0b6ac422b5bea54 100644
+index 2a1c89bb6712c97ad48b9f64c26f36afe8c811e4..89537be6aa821bb8a3de23c587e54f3d7f63730a 100644
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
-@@ -1397,12 +1397,17 @@ public abstract class Level implements LevelAccessor, UUIDLookup<Entity>, AutoCl
+@@ -1063,6 +1063,22 @@ public abstract class Level implements LevelAccessor, UUIDLookup<Entity>, AutoCl
+         // Paper end - Perf: make sure loaded chunks get the inlined variant of this function
+     }
+ 
++    // Leaf start - optimize get chunk
++    @Nullable
++    public final LevelChunk getChunkAtIfLoadedUnchecked(int x, int z) {
++        return ((ServerLevel) this).chunkSource.fullChunksNonSync.get(ChunkPos.asLong(x, z));
++    }
++
++    @Nullable
++    public final BlockState getBlockStateIfLoadedUnchecked(int x, int y, int z) {
++        if (this.isOutsideBuildHeight(y)) {
++            return Blocks.VOID_AIR.defaultBlockState();
++        } else {
++            LevelChunk chunk = ((ServerLevel) this).chunkSource.fullChunksNonSync.get(ChunkPos.asLong(x >> 4, z >> 4));
++            return chunk == null ? null : chunk.getBlockStateFinal(x, y, z);
++        }
++    }
++    // Leaf end - optimize get chunk
+     // Paper start - if loaded
+     @Nullable
+     @Override
+@@ -1397,12 +1413,17 @@ public abstract class Level implements LevelAccessor, UUIDLookup<Entity>, AutoCl
              }
          }
          // CraftBukkit end
@@ -214,7 +266,7 @@ index 2a1c89bb6712c97ad48b9f64c26f36afe8c811e4..c18614dbb86e843752fba35ee0b6ac42
      }
  
      @Override
-@@ -1522,7 +1527,7 @@ public abstract class Level implements LevelAccessor, UUIDLookup<Entity>, AutoCl
+@@ -1522,7 +1543,7 @@ public abstract class Level implements LevelAccessor, UUIDLookup<Entity>, AutoCl
              // Spigot end
              if (tickingBlockEntity.isRemoved()) {
                  ((org.dreeam.leaf.util.list.BlockEntityTickersList) this.blockEntityTickers).markAsRemoved(this.tileTickPosition); // toRemove.add(tickingBlockEntity); // SparklyPaper - optimize block entity removals // Paper - Fix MC-117075; use removeAll
@@ -223,6 +275,19 @@ index 2a1c89bb6712c97ad48b9f64c26f36afe8c811e4..c18614dbb86e843752fba35ee0b6ac42
                  tickingBlockEntity.tick();
                  // Paper start - rewrite chunk system
                  // Leaf start - SparklyPaper - parallel world ticking (only run mid-tick at the end of each tick / fixes concurrency bugs related to executeMidTickTasks) - do not bother with condition work / make configurable
+diff --git a/net/minecraft/world/level/block/SpreadingSnowyDirtBlock.java b/net/minecraft/world/level/block/SpreadingSnowyDirtBlock.java
+index f8cc3f870d88715386bb4de0da81a74fa04fd216..46f8158983dbfff9d5e4bc5fdb350f04ea83bd89 100644
+--- a/net/minecraft/world/level/block/SpreadingSnowyDirtBlock.java
++++ b/net/minecraft/world/level/block/SpreadingSnowyDirtBlock.java
+@@ -52,7 +52,7 @@ public abstract class SpreadingSnowyDirtBlock extends SnowyDirtBlock {
+     protected void randomTick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
+         if (this instanceof GrassBlock && level.paperConfig().tickRates.grassSpread != 1 && (level.paperConfig().tickRates.grassSpread < 1 || (net.minecraft.server.MinecraftServer.currentTick + pos.hashCode()) % level.paperConfig().tickRates.grassSpread != 0)) { return; } // Paper - Configurable random tick rates for blocks
+         // Paper start - Perf: optimize dirt and snow spreading
+-        final net.minecraft.world.level.chunk.ChunkAccess cachedBlockChunk = level.getChunkIfLoaded(pos);
++        final net.minecraft.world.level.chunk.ChunkAccess cachedBlockChunk = level.getChunkAtIfLoadedUnchecked(pos.getX(), pos.getZ()); // Leaf - optimize get chunk
+         if (cachedBlockChunk == null) { // Is this needed?
+             return;
+         }
 diff --git a/net/minecraft/world/level/chunk/LevelChunk.java b/net/minecraft/world/level/chunk/LevelChunk.java
 index c3ecdd80efad340c9fa0ea6913db9a3362b53ad4..17be5a6c1fc0a8a6c1c77c624f181cf5eddb4d70 100644
 --- a/net/minecraft/world/level/chunk/LevelChunk.java

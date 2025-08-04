@@ -1,6 +1,8 @@
 package org.dreeam.leaf.world;
 
+import ca.spottedleaf.moonrise.common.util.TickThread;
 import it.unimi.dsi.fastutil.HashCommon;
+import net.minecraft.server.level.ServerLevel;
 
 import java.util.Arrays;
 import java.util.concurrent.Future;
@@ -59,7 +61,7 @@ public final class ChunkCache<V> {
     /// @param k the key whose associated value is to be returned
     /// @return the value associated with the key, or `null` if no mapping exists
     /// @implNote This method updates the single-entry cache on successful lookups
-    /// @see #isSameThread
+    /// @see #isSameThread()
     public V get(long k) {
         long k1 = this.k1;
         V v1 = this.v1;
@@ -185,9 +187,12 @@ public final class ChunkCache<V> {
     /// Checks if the current thread is the same as the owning thread.
     ///
     /// @return the current thread owns this map
-    /// @implNote This method does not perform synchronization
     public boolean isSameThread() {
         return Thread.currentThread() == this.thread;
+    }
+
+    public boolean isSameThreadFor(ServerLevel serverLevel, int chunkX, int chunkZ) {
+        return Thread.currentThread() == this.thread && TickThread.isTickThreadFor(serverLevel, chunkX, chunkZ);
     }
 
     /// Ensure that the current thread is the owning thread.
