@@ -16,10 +16,17 @@ import net.minecraft.world.level.material.FluidState;
 
 public final class RandomTickSystem {
     private static final long SCALE = 0x100000L;
-    private static final long TICK_FILTER_MASK = 0b1111L;
-    private static final int BITS_STEP = 4;
-    private static final int BITS_MAX = 60;
-    private static final long CHUNK_BLOCKS = 4096L / 4L;
+    private static final long FILTER_MASK = 0b11L;
+    private static final long SECTION_MASK = 0xFFFFL;
+    private static final int SECTION_MASK_INT = 0xFFFF;
+    private static final int SECTION_BITS = 16;
+    private static final int BITS_STEP = 2;
+    private static final int BITS_MAX = 62;
+    private static final long BLOCKS_COUNT = 4096L;
+    private static final long BLOCKS_SCALED = SCALE / BLOCKS_COUNT / (FILTER_MASK + 1L);
+    private static final long CHUNK_OFFSET_1 = 0x10000L;
+    private static final long CHUNK_OFFSET_2 = 0x20000L;
+    private static final long CHUNK_OFFSET_3 = 0x30000L;
 
     private final LongArrayList queue = new LongArrayList();
     private long[] samples = LongArrays.EMPTY_ARRAY;
@@ -48,8 +55,8 @@ public final class RandomTickSystem {
         final int minY = ca.spottedleaf.moonrise.common.util.WorldUtil.getMinSection(world) << 4;
         for (int k = 0, len = queue.size(); k < len; ++k) {
             final long packed = q[k];
-            final LevelChunk chunk = raw[(int) (packed >>> 16)];
-            tickBlock(world, chunk, (int) (packed & 0xFFFF), random, minY);
+            final LevelChunk chunk = raw[(int) (packed >>> SECTION_BITS)];
+            tickBlock(world, chunk, (int) (packed & SECTION_MASK), random, minY);
         }
     }
 
@@ -86,22 +93,22 @@ public final class RandomTickSystem {
 
         int i = 0;
         int m = 0;
-        final long scale = randomTickSpeed * SCALE / CHUNK_BLOCKS;
-        for (int j = size - 3; i < j; i++) {
+        final long scale = randomTickSpeed * BLOCKS_SCALED;
+        for (int j = size - 3; i < j; i += 4) {
             if (bits != BITS_MAX) {
                 bits += BITS_STEP;
             } else {
                 bits = 0;
                 cacheRandom = random.nextLong();
             }
-            if ((cacheRandom & (TICK_FILTER_MASK << bits)) != 0L) {
+            if ((cacheRandom & (FILTER_MASK << bits)) != 0L) {
                 continue;
             }
             final LevelChunk chunk1 = raw[i];
             final LevelChunk chunk2 = raw[i + 1];
             final LevelChunk chunk3 = raw[i + 2];
             final LevelChunk chunk4 = raw[i + 3];
-            final long l = ((long) i) << 16;
+            final long l = ((long) i) << SECTION_BITS;
             if (chunk1.leaf$tickingBlocksDirty) {
                 populateChunkTickingCount(chunk1);
             }
@@ -126,35 +133,41 @@ public final class RandomTickSystem {
             weights = LongArrays.grow(weights, m + s1 + s2 + s3 + s4, m);
             for (int k = 0; k < s1; k++, m++) {
                 int packed = ticking1[k];
-                long weight = (packed >>> 16) * scale;
+                long weight = (packed >>> SECTION_BITS) * scale;
                 weightsSum += weight;
-                samples[m] = l | (packed & 0xFFFFL);
+                samples[m] = l | (packed & SECTION_MASK);
                 weights[m] = weight;
             }
             for (int k = 0; k < s2; k++, m++) {
                 int packed = ticking2[k];
-                long weight = (packed >>> 16) * scale;
+                long weight = (packed >>> SECTION_BITS) * scale;
                 weightsSum += weight;
-                samples[m] = (l + 0x10000L) | (packed & 0xFFFFL);
+                samples[m] = (l + CHUNK_OFFSET_1) | (packed & SECTION_MASK);
                 weights[m] = weight;
             }
             for (int k = 0; k < s3; k++, m++) {
                 int packed = ticking3[k];
-                long weight = (packed >>> 16) * scale;
+                long weight = (packed >>> SECTION_BITS) * scale;
                 weightsSum += weight;
-                samples[m] = (l + 0x20000L) | (packed & 0xFFFFL);
+                samples[m] = (l + CHUNK_OFFSET_2) | (packed & SECTION_MASK);
                 weights[m] = weight;
             }
             for (int k = 0; k < s4; k++, m++) {
                 int packed = ticking4[k];
-                long weight = (packed >>> 16) * scale;
+                long weight = (packed >>> SECTION_BITS) * scale;
                 weightsSum += weight;
-                samples[m] = (l + 0x30000L) | (packed & 0xFFFFL);
+                samples[m] = (l + CHUNK_OFFSET_3) | (packed & SECTION_MASK);
                 weights[m] = weight;
             }
         }
         for (; i < size; i++) {
-            if ((random.nextInt() & ((int) (TICK_FILTER_MASK >>> 2))) != 0) {
+            if (bits != BITS_MAX) {
+                bits += BITS_STEP;
+            } else {
+                bits = 0;
+                cacheRandom = random.nextLong();
+            }
+            if ((cacheRandom & (FILTER_MASK << bits)) != 0L) {
                 continue;
             }
             final LevelChunk chunk = raw[i];
@@ -164,9 +177,9 @@ public final class RandomTickSystem {
             samples = LongArrays.grow(samples, m + chunk.leaf$tickingCount.length, m);
             weights = LongArrays.grow(weights, m + chunk.leaf$tickingCount.length, m);
             for (int packed : chunk.leaf$tickingCount) {
-                long weight = (packed >>> 16) * scale;
+                long weight = (packed >>> SECTION_BITS) * scale;
                 weightsSum += weight;
-                samples[m] = ((long) i << 16) | (packed & 0xFFFFL);
+                samples[m] = ((long) i << SECTION_BITS) | (packed & SECTION_MASK);
                 weights[m] = weight;
                 m++;
             }
@@ -191,7 +204,7 @@ public final class RandomTickSystem {
             ShortList list = sections[j].moonrise$getTickingBlockList();
             int n = list.size();
             if (n != 0) {
-                chunk.leaf$tickingCount[k++] = (n << 16) | (j & 0xFFFF);
+                chunk.leaf$tickingCount[k++] = (n << 16) | (j & SECTION_MASK_INT);
             }
         }
     }
