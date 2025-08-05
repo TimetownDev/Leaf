@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayanesuru <hayanesuru@outlook.jp>
+Date: Mon, 4 Aug 2025 18:55:55 +0900
+Subject: [PATCH] optimize Entity#getOnPos
+
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 5cbc99b796546b8633216a7cc1cd8f5a6ffaebc7..f7d2eb113ffaf0d0b45a31ceaec5b05af98419ce 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -1483,24 +1483,26 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+     }
+ 
+     protected BlockPos getOnPos(float yOffset) {
+-        if (this.mainSupportingBlockPos.isPresent() && this.level().getChunkIfLoadedImmediately(this.mainSupportingBlockPos.get()) != null) { // Paper - ensure no loads
++        // Leaf start - optimize get chunk
++        if (this.mainSupportingBlockPos.isPresent()) {
+             BlockPos blockPos = this.mainSupportingBlockPos.get();
+-            if (!(yOffset > 1.0E-5F)) {
+-                return blockPos;
+-            } else {
+-                BlockState blockState = this.level().getBlockState(blockPos);
+-                return (!(yOffset <= 0.5) || !blockState.is(BlockTags.FENCES))
+-                        && !blockState.is(BlockTags.WALLS)
+-                        && !(blockState.getBlock() instanceof FenceGateBlock)
++            BlockState blockState = this.level().getBlockStateIfLoadedUnchecked(blockPos.getX(), blockPos.getY(), blockPos.getZ());
++            if (blockState != null) {
++                if (!(yOffset > 1.0E-5F)) {
++                    return blockPos;
++                }
++                return (!(yOffset <= 0.5) || ((blockState.tagFlag & org.dreeam.leaf.util.BlockUtil.FENCE_TAG) == 0))
++                    && ((blockState.tagFlag & org.dreeam.leaf.util.BlockUtil.WALL_TAG) == 0)
++                    && ((blockState.tagFlag & org.dreeam.leaf.util.BlockUtil.FENCE_GATE) == 0)
+                     ? blockPos.atY(Mth.floor(this.position.y - yOffset))
+                     : blockPos;
+             }
+-        } else {
+-            int floor = Mth.floor(this.position.x);
+-            int floor1 = Mth.floor(this.position.y - yOffset);
+-            int floor2 = Mth.floor(this.position.z);
+-            return new BlockPos(floor, floor1, floor2);
+         }
++        int floor = Mth.floor(this.position.x);
++        int floor1 = Mth.floor(this.position.y - yOffset);
++        int floor2 = Mth.floor(this.position.z);
++        return new BlockPos(floor, floor1, floor2);
++        // Leaf end - optimize get chunk
+     }
+ 
+     protected float getBlockJumpFactor() {
+@@ -5026,7 +5028,8 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+     // Gale start - don't load chunks to activate climbing entities
+     public @Nullable BlockState getInBlockStateIfLoaded() {
+         if (this.inBlockState == null) {
+-            this.inBlockState = this.level.getBlockStateIfLoaded(this.blockPosition());
++            BlockPos pos = this.blockPosition(); // Leaf - optimize get chunk
++            this.inBlockState = this.level.getBlockStateIfLoadedUnchecked(pos.getX(), pos.getY(), pos.getZ()); // Leaf - optimize get chunk
+         }
+ 
+         return this.inBlockState;
