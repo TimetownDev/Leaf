@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: hayanesuru <hayanesuru@outlook.jp>
 Date: Fri, 23 May 2025 12:01:42 +0900
-Subject: [PATCH] Cache block path type
+Subject: [PATCH] Cache block state path type and tags
 
 
 diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
@@ -36,7 +36,7 @@ index 57aad048034005543a72556e990b53db8deebfee..6e6ee6f25f7cab0a6235d9e583ed5c01
 +    // Leaf end - Cache path type
  }
 diff --git a/net/minecraft/world/level/block/state/BlockBehaviour.java b/net/minecraft/world/level/block/state/BlockBehaviour.java
-index 6d522e9485fadd6fc0f350cb30ba5224aa046d4f..e2c049167f7b31051eddfbf5eda7b39389cecee0 100644
+index 6d522e9485fadd6fc0f350cb30ba5224aa046d4f..1ee9a0d4a783d9b190c6b5b07e63a38c98df1056 100644
 --- a/net/minecraft/world/level/block/state/BlockBehaviour.java
 +++ b/net/minecraft/world/level/block/state/BlockBehaviour.java
 @@ -473,6 +473,8 @@ public abstract class BlockBehaviour implements FeatureElement {
@@ -48,18 +48,20 @@ index 6d522e9485fadd6fc0f350cb30ba5224aa046d4f..e2c049167f7b31051eddfbf5eda7b393
  
          private static void initCaches(final VoxelShape shape, final boolean neighbours) {
              ((ca.spottedleaf.moonrise.patches.collisions.shape.CollisionVoxelShape)shape).moonrise$isFullBlock();
-@@ -642,6 +644,17 @@ public abstract class BlockBehaviour implements FeatureElement {
+@@ -642,6 +644,19 @@ public abstract class BlockBehaviour implements FeatureElement {
              // Paper end - optimise collisions
          }
  
 +        // Leaf start - Cache path type
 +        public void initPathType() {
 +            pathType = (byte) net.minecraft.world.level.pathfinder.WalkNodeEvaluator.getPathTypeFromState(this.asState()).ordinal();
-+            tagFlag = this.asState().is(net.minecraft.tags.BlockTags.WALLS) ? (byte) 1 : (byte) 0;
-+            tagFlag |= this.asState().is(net.minecraft.tags.BlockTags.FENCES) ? (byte) 2 : (byte) 0;
-+            tagFlag |= this.asState().is(net.minecraft.tags.BlockTags.CLIMBABLE) ? (byte) 4 : (byte) 0;
-+            tagFlag |= this.getBlock() instanceof net.minecraft.world.level.block.FenceGateBlock ? (byte) 8 : (byte) 0;
-+            tagFlag |= this.getBlock() instanceof net.minecraft.world.level.block.TrapDoorBlock ? (byte) 16 : (byte) 0;
++            int tagFlag = 0;
++            tagFlag |= this.asState().is(net.minecraft.tags.BlockTags.WALLS) ? org.dreeam.leaf.util.BlockUtil.WALL_TAG : 0;
++            tagFlag |= this.asState().is(net.minecraft.tags.BlockTags.FENCES) ? org.dreeam.leaf.util.BlockUtil.FENCE_TAG : 0;
++            tagFlag |= this.asState().is(net.minecraft.tags.BlockTags.CLIMBABLE) ? org.dreeam.leaf.util.BlockUtil.CLIMBABLE : 0;
++            tagFlag |= this.getBlock() instanceof net.minecraft.world.level.block.FenceGateBlock ? org.dreeam.leaf.util.BlockUtil.FENCE_GATE : 0;
++            tagFlag |= this.getBlock() instanceof net.minecraft.world.level.block.TrapDoorBlock ? org.dreeam.leaf.util.BlockUtil.TRAP_DOOR : 0;
++            this.tagFlag = (byte) tagFlag;
 +        }
 +        // Leaf end - Cache path type
 +

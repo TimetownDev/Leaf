@@ -5,7 +5,7 @@ Subject: [PATCH] optimize LivingEntity#onClimbable
 
 
 diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
-index a55b1534dc3c0745ff569f5c1e07dbeaba0fe57d..058e83a6030c26821dc87a774a12c5680d0147dc 100644
+index a55b1534dc3c0745ff569f5c1e07dbeaba0fe57d..30779503e918557638b422f7c740210fdc6bb1cd 100644
 --- a/net/minecraft/world/entity/LivingEntity.java
 +++ b/net/minecraft/world/entity/LivingEntity.java
 @@ -2223,10 +2223,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
@@ -55,12 +55,12 @@ index a55b1534dc3c0745ff569f5c1e07dbeaba0fe57d..058e83a6030c26821dc87a774a12c568
              }
              // Gale end - don't load chunks to activate climbing entities
 -            if (inBlockState.is(BlockTags.CLIMBABLE)) {
-+            if ((inBlockState.tagFlag & 4) == 4) {
++            if ((inBlockState.tagFlag & org.dreeam.leaf.util.BlockUtil.CLIMBABLE) != 0) {
                  this.lastClimbablePos = Optional.of(blockPos);
 -                return true;
 -            } else if (inBlockState.getBlock() instanceof TrapDoorBlock && this.trapdoorUsableAsLadder(blockPos, inBlockState)) {
 +                return 1;
-+            } else if ((inBlockState.tagFlag & 16) == 16 && this.trapdoorUsableAsLadder(blockPos, inBlockState)) {
++            } else if ((inBlockState.tagFlag & org.dreeam.leaf.util.BlockUtil.TRAP_DOOR) != 0 && this.trapdoorUsableAsLadder(blockPos, inBlockState)) {
                  this.lastClimbablePos = Optional.of(blockPos);
 -                return true;
 +                return 1;
